@@ -1,30 +1,76 @@
 import org.json.JSONObject;
 import org.json.JSONArray;
-import org.w3c.dom.*;
-import javax.xml.parsers.*;
+import org.xml.sax.*;
+import org.xml.sax.helpers.DefaultHandler;
+
 import java.io.*;
 import java.util.*;
 
 public class XMLReaderApp {
+
+    // SAX handler to process the XML
+    static class XMLHandler extends DefaultHandler {
+        private JSONArray jsonRecords;
+        private JSONObject currentRecord;
+        private StringBuilder currentFieldValue;
+        private Set<String> validFields;
+
+        public XMLHandler(Set<String> validFields) {
+            this.jsonRecords = new JSONArray();
+            this.validFields = validFields;
+        }
+
+        // When we encounter the start of an element, we'll check if it's one of the valid fields
+        @Override
+        public void startElement(String uri, String localName, String qName, Attributes attributes) {
+            // If we're encountering a valid field, we need to prepare to store its value
+            if (validFields.contains(qName)) {
+                currentFieldValue = new StringBuilder();
+            }
+
+            // If we encounter the "record" element, we need to start a new record
+            if ("record".equals(qName)) {
+                currentRecord = new JSONObject();
+            }
+        }
+
+        // When we encounter text content inside an element, we store it
+        @Override
+        public void characters(char[] ch, int start, int length) {
+            if (currentFieldValue != null) {
+                currentFieldValue.append(new String(ch, start, length));
+            }
+        }
+
+        // When we encounter the end of an element, we save its content in the current record
+        @Override
+        public void endElement(String uri, String localName, String qName) {
+            // If we were processing a valid field, add its value to the current record
+            if (validFields.contains(qName)) {
+                currentRecord.put(qName, currentFieldValue.toString().trim());
+            }
+
+            // If we've encountered the end of a record, add it to the records list
+            if ("record".equals(qName)) {
+                jsonRecords.put(currentRecord);
+            }
+        }
+
+        // Retrieve the resulting JSON records
+        public JSONArray getJsonRecords() {
+            return jsonRecords;
+        }
+    }
+
     public static void main(String[] args) {
         try {
             // Path to your XML file
             File file = new File("C:\\Users\\User\\Desktop\\TaskToo\\tasktoo\\data.xml");
 
-            // Parse the XML file
-            DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-            factory.setNamespaceAware(true);
-            DocumentBuilder builder = factory.newDocumentBuilder();
-            Document doc = builder.parse(file);
-            doc.getDocumentElement().normalize();
-
-            // Get all "record" elements
-            NodeList recordList = doc.getElementsByTagName("record");
-
-            // Set up a list of valid fields for validation
+            // Set up the valid fields for validation
             Set<String> validFields = new HashSet<>(Arrays.asList("name", "postalZip", "region", "country", "address", "list"));
 
-            // Create a scanner for user input
+            // Set up a scanner for user input
             Scanner scanner = new Scanner(System.in);
 
             // Ask the user for the fields they want to see
@@ -50,28 +96,16 @@ public class XMLReaderApp {
                 return;
             }
 
-            // Create a JSON array to hold all the records
-            JSONArray jsonRecords = new JSONArray();
+            // Set up SAX parser
+            SAXParserFactory factory = SAXParserFactory.newInstance();
+            SAXParser parser = factory.newSAXParser();
+            XMLHandler handler = new XMLHandler(new HashSet<>(validSelectedFields));
 
-            // Iterate through each record
-            for (int i = 0; i < recordList.getLength(); i++) {
-                Node record = recordList.item(i);
-                if (record.getNodeType() == Node.ELEMENT_NODE) {
-                    Element recordElement = (Element) record;
-                    JSONObject jsonObject = new JSONObject();
+            // Parse the XML using SAX
+            parser.parse(file, handler);
 
-                    // Add only the valid fields selected by the user
-                    for (String field : validSelectedFields) {
-                        NodeList nodeList = recordElement.getElementsByTagName(field);
-                        if (nodeList.getLength() > 0) {
-                            String fieldValue = nodeList.item(0).getTextContent();
-                            jsonObject.put(field, fieldValue);
-                        }
-                    }
-
-                    jsonRecords.put(jsonObject);
-                }
-            }
+            // Retrieve the JSON output from the handler
+            JSONArray jsonRecords = handler.getJsonRecords();
 
             // Print the JSON output
             System.out.println("Generated JSON output:");
